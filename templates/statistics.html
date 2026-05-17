@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}考勤统计 - 智能考勤系统{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📊 考勤统计</h1>
+    <p>概览与数据分析</p>
+</div>
+
+<div class="stats-cards">
+    <div class="stat-card">
+        <div class="stat-number" id="totalPersons">0</div>
+        <div class="stat-label">总注册人数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number" id="todayChecked">0</div>
+        <div class="stat-label">今日签到</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number" id="todayRate">0%</div>
+        <div class="stat-label">今日出勤率</div>
+    </div>
+</div>
+
+<div class="chart-container">
+    <h2>近7天签到趋势</h2>
+    <div id="trendChart" class="chart"></div>
+</div>
+
+<div class="chart-container">
+    <h2>个人签到排行</h2>
+    <div id="rankingChart" class="chart"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadStatistics() {
+    try {
+        const res = await fetch('/api/statistics');
+        const data = await res.json();
+        if (!data.success) return;
+
+        // 更新概览卡片
+        document.getElementById('totalPersons').textContent = data.total_persons;
+        document.getElementById('todayChecked').textContent = data.today_checked;
+        const rate = data.total_persons > 0
+            ? ((data.today_checked / data.total_persons) * 100).toFixed(1) + '%'
+            : '0%';
+        document.getElementById('todayRate').textContent = rate;
+
+        // 签到趋势图
+        const trendChart = echarts.init(document.getElementById('trendChart'));
+        trendChart.setOption({
+            tooltip: { trigger: 'axis' },
+            xAxis: {
+                type: 'category',
+                data: data.daily_trend.map(d => d.date),
+            },
+            yAxis: { type: 'value', minInterval: 1 },
+            series: [{
+                type: 'line',
+                data: data.daily_trend.map(d => d.count),
+                smooth: true,
+                lineStyle: { color: '#4f46e5', width: 3 },
+                areaStyle: { color: 'rgba(79,70,229,0.1)' },
+                symbol: 'circle',
+                symbolSize: 8,
+            }],
+            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        });
+
+        // 个人排行图
+        if (data.ranking.length > 0) {
+            const rankingChart = echarts.init(document.getElementById('rankingChart'));
+            rankingChart.setOption({
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', data: data.ranking.map(r => r.name) },
+                yAxis: { type: 'value', minInterval: 1 },
+                series: [{
+                    type: 'bar',
+                    data: data.ranking.map(r => r.total),
+                    itemStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: '#4f46e5' },
+                            { offset: 1, color: '#818cf8' },
+                        ]),
+                        borderRadius: [4, 4, 0, 0],
+                    },
+                }],
+                grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+            });
+        }
+
+        // 自适应
+        window.addEventListener('resize', () => {
+            trendChart.resize();
+            if (rankingChart) rankingChart.resize();
+        });
+    } catch (err) {
+        console.error('加载统计数据失败:', err);
+    }
+}
+
+loadStatistics();
+</script>
+{% endblock %}

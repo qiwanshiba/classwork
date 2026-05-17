@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}签到 - 智能考勤系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📸 人脸签到</h1>
+    <p>上传照片完成签到</p>
+</div>
+
+<div class="checkin-card">
+    <div class="camera-section">
+        <video id="video" autoplay playsinline class="video-preview"></video>
+        <canvas id="canvas" style="display:none;"></canvas>
+        <div id="photoPreview" class="photo-preview" style="display:none;">
+            <img id="previewImg" alt="预览">
+        </div>
+
+        <div class="camera-controls">
+            <button id="openCameraBtn" class="btn btn-secondary">📷 打开摄像头</button>
+            <button id="captureBtn" class="btn btn-primary" style="display:none;">📸 拍照</button>
+            <button id="retakeBtn" class="btn btn-secondary" style="display:none;">🔄 重拍</button>
+            <input type="file" id="fileInput" accept="image/*" style="display:none;">
+            <button id="uploadBtn" class="btn btn-secondary">🖼️ 上传照片</button>
+        </div>
+    </div>
+
+    <button id="checkinBtn" class="btn btn-primary btn-large" disabled>
+        ✅ 确认签到
+    </button>
+
+    <div id="result" class="result-card" style="display:none;">
+        <div id="resultIcon" class="result-icon"></div>
+        <div id="resultMessage" class="result-message"></div>
+    </div>
+
+    <div class="spinner" id="loading" style="display:none;">
+        <div class="spinner-icon"></div>
+        <p>处理中，请稍候...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const previewImg = document.getElementById('previewImg');
+const photoPreview = document.getElementById('photoPreview');
+const openCameraBtn = document.getElementById('openCameraBtn');
+const captureBtn = document.getElementById('captureBtn');
+const retakeBtn = document.getElementById('retakeBtn');
+const uploadBtn = document.getElementById('uploadBtn');
+const fileInput = document.getElementById('fileInput');
+const checkinBtn = document.getElementById('checkinBtn');
+const result = document.getElementById('result');
+const loading = document.getElementById('loading');
+const loadingText = loading ? loading.querySelector('p') : null;
+
+let stream = null;
+let currentPhotoData = null;
+
+// ===== 图片压缩（关键优化！） =====
+function compressImage(dataUrl, maxW, maxH, quality) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = function() {
+            let w = img.width, h = img.height;
+            // 等比例缩小
+            if (w > maxW) { h = h * maxW / w; w = maxW; }
+            if (h > maxH) { w = w * maxH / h; h = maxH; }
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            c.toBlob(function(blob) {
+                resolve(blob);
+            }, 'image/jpeg', quality || 0.6);
+        };
+        img.src = dataUrl;
+    });
+}
+
+// 打开摄像头
+openCameraBtn.addEventListener('click', async () => {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        video.srcObject = stream;
+        video.style.display = 'block';
+        photoPreview.style.display = 'none';
+        openCameraBtn.style.display = 'none';
+        captureBtn.style.display = 'inline-block';
+        uploadBtn.style.display = 'none';
+        retakeBtn.style.display = 'none';
+        checkinBtn.disabled = true;
+    } catch (err) {
+        alert('无法打开摄像头: ' + err.message);
+    }
+});
+
+// 拍照
+captureBtn.addEventListener('click', () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    currentPhotoData = canvas.toDataURL('image/jpeg');
+
+    previewImg.src = currentPhotoData;
+    photoPreview.style.display = 'block';
+    video.style.display = 'none';
+    captureBtn.style.display = 'none';
+    retakeBtn.style.display = 'inline-block';
+    checkinBtn.disabled = false;
+
+    if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+    }
+});
+
+// 重拍
+retakeBtn.addEventListener('click', () => {
+    currentPhotoData = null;
+    photoPreview.style.display = 'none';
+    video.style.display = 'none';
+    openCameraBtn.style.display = 'inline-block';
+    uploadBtn.style.display = 'inline-block';
+    captureBtn.style.display = 'none';
+    retakeBtn.style.display = 'none';
+    checkinBtn.disabled = true;
+    result.style.display = 'none';
+});
+
+// 上传照片
+uploadBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        currentPhotoData = ev.target.result;
+        previewImg.src = currentPhotoData;
+        photoPreview.style.display = 'block';
+        video.style.display = 'none';
+        openCameraBtn.style.display = 'none';
+        uploadBtn.style.display = 'none';
+        captureBtn.style.display = 'none';
+        retakeBtn.style.display = 'inline-block';
+        checkinBtn.disabled = false;
+        result.style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+});
+
+// 签到（压缩后上传）
+checkinBtn.addEventListener('click', async () => {
+    if (!currentPhotoData) return;
+
+    loading.style.display = 'block';
+    result.style.display = 'none';
+    checkinBtn.disabled = true;
+    if (loadingText) loadingText.textContent = '压缩图片中...';
+
+    try {
+        // 先压缩到 640px，上传体积缩小 5-10 倍
+        if (loadingText) loadingText.textContent = '上传识别中...';
+        const blob = await compressImage(currentPhotoData, 640, 480, 0.6);
+        const formData = new FormData();
+        formData.append('photo', blob, 'checkin.jpg');
+
+        const res = await fetch('/checkin', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        const icon = document.getElementById('resultIcon');
+        const msg = document.getElementById('resultMessage');
+
+        if (data.success) {
+            if (data.already_checked) {
+                icon.textContent = '⚠️';
+                msg.innerHTML = `<strong>${data.person_name}</strong>，你今天已经签到了<br>签到时间: ${data.check_in_time}<br><small>耗时: ${data.elapsed || '?'} 秒</small>`;
+            } else {
+                icon.textContent = '✅';
+                msg.innerHTML = `<strong>${data.person_name}</strong>，签到成功！<br>时间: ${data.check_in_time}<br>匹配度: ${(data.similarity * 100).toFixed(1)}%<br><small>耗时: ${data.elapsed || '?'} 秒</small>`;
+            }
+        } else {
+            icon.textContent = '❌';
+            msg.textContent = data.message || '签到失败';
+        }
+
+        result.style.display = 'block';
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    } finally {
+        loading.style.display = 'none';
+        checkinBtn.disabled = false;
+    }
+});
+</script>
+{% endblock %}

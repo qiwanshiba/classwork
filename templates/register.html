@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}人脸录入 - 智能考勤系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>👤 人脸录入</h1>
+    <p>录入人员信息与人脸数据</p>
+</div>
+
+<div class="register-card">
+    <div class="form-group">
+        <label for="name">姓名</label>
+        <input type="text" id="name" class="form-input" placeholder="请输入姓名" maxlength="20">
+    </div>
+
+    <div class="photo-section">
+        <video id="video" autoplay playsinline class="video-preview"></video>
+        <canvas id="canvas" style="display:none;"></canvas>
+        <div id="photoPreview" class="photo-preview" style="display:none;">
+            <img id="previewImg" alt="预览">
+        </div>
+
+        <div class="camera-controls">
+            <button id="openCameraBtn" class="btn btn-secondary">📷 打开摄像头</button>
+            <button id="captureBtn" class="btn btn-primary" style="display:none;">📸 拍照</button>
+            <button id="retakeBtn" class="btn btn-secondary" style="display:none;">🔄 重拍</button>
+            <input type="file" id="fileInput" accept="image/*" style="display:none;">
+            <button id="uploadBtn" class="btn btn-secondary">🖼️ 上传照片</button>
+        </div>
+    </div>
+
+    <button id="registerBtn" class="btn btn-success btn-large" disabled>
+        💾 保存录入
+    </button>
+
+    <div id="message" class="result-card" style="display:none;"></div>
+    <div class="spinner" id="loading" style="display:none;">
+        <div class="spinner-icon"></div>
+        <p>处理中，请稍候...</p>
+    </div>
+</div>
+
+<div class="persons-section">
+    <h2>已录入人员</h2>
+    <table class="table" id="personsTable">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>姓名</th>
+                <th>录入时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="personsBody"></tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const previewImg = document.getElementById('previewImg');
+const photoPreview = document.getElementById('photoPreview');
+const openCameraBtn = document.getElementById('openCameraBtn');
+const captureBtn = document.getElementById('captureBtn');
+const retakeBtn = document.getElementById('retakeBtn');
+const uploadBtn = document.getElementById('uploadBtn');
+const fileInput = document.getElementById('fileInput');
+const nameInput = document.getElementById('name');
+const registerBtn = document.getElementById('registerBtn');
+const message = document.getElementById('message');
+const loading = document.getElementById('loading');
+
+let stream = null;
+let currentPhotoData = null;
+
+// ===== 图片压缩（同签到页面） =====
+function compressImage(dataUrl, maxW, maxH, quality) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = function() {
+            let w = img.width, h = img.height;
+            if (w > maxW) { h = h * maxW / w; w = maxW; }
+            if (h > maxH) { w = w * maxH / h; h = maxH; }
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            c.toBlob(function(blob) {
+                resolve(blob);
+            }, 'image/jpeg', quality || 0.6);
+        };
+        img.src = dataUrl;
+    });
+}
+
+// 摄像头控制（同签到页面逻辑）
+openCameraBtn.addEventListener('click', async () => {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        video.srcObject = stream;
+        video.style.display = 'block';
+        photoPreview.style.display = 'none';
+        openCameraBtn.style.display = 'none';
+        captureBtn.style.display = 'inline-block';
+        uploadBtn.style.display = 'none';
+    } catch (err) {
+        alert('无法打开摄像头: ' + err.message);
+    }
+});
+
+captureBtn.addEventListener('click', () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    currentPhotoData = canvas.toDataURL('image/jpeg');
+    previewImg.src = currentPhotoData;
+    photoPreview.style.display = 'block';
+    video.style.display = 'none';
+    captureBtn.style.display = 'none';
+    retakeBtn.style.display = 'inline-block';
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    updateRegisterBtn();
+});
+
+retakeBtn.addEventListener('click', () => {
+    currentPhotoData = null;
+    photoPreview.style.display = 'none';
+    video.style.display = 'none';
+    openCameraBtn.style.display = 'inline-block';
+    uploadBtn.style.display = 'inline-block';
+    captureBtn.style.display = 'none';
+    retakeBtn.style.display = 'none';
+    updateRegisterBtn();
+});
+
+uploadBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        currentPhotoData = ev.target.result;
+        previewImg.src = currentPhotoData;
+        photoPreview.style.display = 'block';
+        video.style.display = 'none';
+        openCameraBtn.style.display = 'none';
+        uploadBtn.style.display = 'none';
+        captureBtn.style.display = 'none';
+        retakeBtn.style.display = 'inline-block';
+        updateRegisterBtn();
+    };
+    reader.readAsDataURL(file);
+});
+
+nameInput.addEventListener('input', updateRegisterBtn);
+
+function updateRegisterBtn() {
+    registerBtn.disabled = !(nameInput.value.trim() && currentPhotoData);
+}
+
+// 注册
+registerBtn.addEventListener('click', async () => {
+    if (!nameInput.value.trim() || !currentPhotoData) return;
+
+    loading.style.display = 'block';
+    message.style.display = 'none';
+    registerBtn.disabled = true;
+
+    try {
+        const blob = await compressImage(currentPhotoData, 640, 480, 0.6);
+        const formData = new FormData();
+        formData.append('name', nameInput.value.trim());
+        formData.append('photo', blob, 'register.jpg');
+
+        const res = await fetch('/register-face', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (data.success) {
+            message.className = 'result-card success';
+            message.innerHTML = `✅ ${data.message}<br><small>耗时: ${data.elapsed || '?'} 秒</small>`;
+            nameInput.value = '';
+            retakeBtn.click();
+            loadPersons();
+        } else {
+            message.className = 'result-card error';
+            message.textContent = '❌ ' + data.message;
+        }
+
+        message.style.display = 'block';
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    } finally {
+        loading.style.display = 'none';
+        registerBtn.disabled = false;
+    }
+});
+
+// 加载已录入人员
+async function loadPersons() {
+    try {
+        const res = await fetch('/api/persons');
+        const data = await res.json();
+        const tbody = document.getElementById('personsBody');
+        tbody.innerHTML = '';
+        if (data.persons) {
+            data.persons.forEach(p => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${p.id}</td>
+                    <td>${p.name}</td>
+                    <td>${p.created_at}</td>
+                    <td><button class="btn btn-danger btn-sm" onclick="deletePerson(${p.id}, '${p.name}')">删除</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+    } catch (err) {
+        console.error('加载人员列表失败:', err);
+    }
+}
+
+async function deletePerson(id, name) {
+    if (!confirm(`确定删除"${name}"及其所有签到记录？`)) return;
+    try {
+        const res = await fetch(`/api/persons/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) loadPersons();
+    } catch (err) {
+        alert('删除失败: ' + err.message);
+    }
+}
+
+loadPersons();
+</script>
+{% endblock %}

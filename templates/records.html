@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}签到记录 - 智能考勤系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📋 签到记录</h1>
+    <p>查看所有人员的签到历史</p>
+</div>
+
+<div class="filter-bar">
+    <label>按日期筛选：</label>
+    <input type="date" id="dateFilter" class="form-input" style="width:auto;">
+    <button id="filterBtn" class="btn btn-primary">筛选</button>
+    <button id="clearFilterBtn" class="btn btn-secondary">显示全部</button>
+</div>
+
+<div class="records-table-wrapper">
+    <table class="table" id="recordsTable">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>姓名</th>
+                <th>签到日期</th>
+                <th>签到时间</th>
+            </tr>
+        </thead>
+        <tbody id="recordsBody">
+            <tr><td colspan="4" style="text-align:center;color:#999;">加载中...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="pagination" id="pagination"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+let currentDate = '';
+
+const dateFilter = document.getElementById('dateFilter');
+const filterBtn = document.getElementById('filterBtn');
+const clearFilterBtn = document.getElementById('clearFilterBtn');
+const recordsBody = document.getElementById('recordsBody');
+const pagination = document.getElementById('pagination');
+
+// 设置默认日期为今天
+dateFilter.valueAsDate = new Date();
+currentDate = dateFilter.value;
+
+async function loadRecords(page = 1) {
+    let url = `/api/records?page=${page}`;
+    if (currentDate) url += `&date=${currentDate}`;
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!data.records || data.records.length === 0) {
+            recordsBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">暂无签到记录</td></tr>';
+            pagination.innerHTML = '';
+            return;
+        }
+
+        recordsBody.innerHTML = '';
+        data.records.forEach(r => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${r.id}</td>
+                <td>${r.person_name || '未知'}</td>
+                <td>${r.date}</td>
+                <td>${r.check_in_time}</td>
+            `;
+            recordsBody.appendChild(tr);
+        });
+
+        // 分页
+        pagination.innerHTML = '';
+        if (data.pages > 1) {
+            for (let i = 1; i <= data.pages; i++) {
+                const btn = document.createElement('button');
+                btn.className = `btn btn-sm ${i === data.current ? 'btn-primary' : 'btn-secondary'}`;
+                btn.textContent = i;
+                btn.onclick = () => loadRecords(i);
+                pagination.appendChild(btn);
+            }
+        }
+    } catch (err) {
+        recordsBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:red;">加载失败</td></tr>';
+    }
+}
+
+filterBtn.addEventListener('click', () => {
+    currentDate = dateFilter.value;
+    currentPage = 1;
+    loadRecords();
+});
+
+clearFilterBtn.addEventListener('click', () => {
+    dateFilter.value = '';
+    currentDate = '';
+    currentPage = 1;
+    loadRecords();
+});
+
+loadRecords();
+</script>
+{% endblock %}

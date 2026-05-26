@@ -35,7 +35,7 @@ pip install tensorflow-directml
 ### 3.1 安装 Python 依赖
 
 ```bash
-cd 课程设计
+cd #目标文件位置
 pip install -r requirements.txt
 ```
 
